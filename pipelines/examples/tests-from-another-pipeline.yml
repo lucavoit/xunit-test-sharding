@@ -1,0 +1,41 @@
+# Example: shard a Reqnroll test project whose compiled .exe is published by another pipeline.
+#
+# - 'tests' is the pipeline that builds the test project and publishes its output as the 'drop' artifact.
+# - 'xunitShard' is the pipeline of this repository (pipelines/azure-pipelines.yml), which publishes
+#   the 'xunit-shard' artifact.
+# - 'sharding' gives access to the job template of this repository.
+resources:
+  repositories:
+  - repository: sharding
+    type: github
+    name: lucavoit/xunit-test-sharding
+    endpoint: github-service-connection   # name of your GitHub service connection
+  pipelines:
+  - pipeline: tests
+    source: MyProduct-Build               # name of the pipeline building the tests
+    trigger: true
+  - pipeline: xunitShard
+    source: xunit-test-sharding           # name of the pipeline of this repository
+
+trigger: none
+
+jobs:
+- template: pipelines/templates/xunit-shard-job.yml@sharding
+  parameters:
+    displayName: Acceptance tests
+    pool:
+      name: MyWindowsPool
+    totalShards: 8
+    testRunTitle: Acceptance tests
+    prepareSteps:
+    - checkout: none
+    - download: tests
+      artifact: drop
+      displayName: Download tests
+    - download: xunitShard
+      artifact: xunit-shard
+      displayName: Download xunit-shard
+    toolPath: $(Pipeline.Workspace)\xunitShard\xunit-shard\xunit-shard.exe
+    testAssembly: $(Pipeline.Workspace)\tests\drop\MyProduct.AcceptanceTests.exe
+    # For instance, exclude tests tagged @manual in Reqnroll (tags are xUnit traits named 'Category')
+    testArguments: -trait- "Category=manual"

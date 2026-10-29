@@ -1,0 +1,79 @@
+# Runs the tests of an xUnit.net v3 test assembly in N parallel jobs, each running one shard, and
+# publishes the JUnit results of every shard.
+#
+# The agents of the job must be able to run the test assembly (.NET runtime) and xunit-shard
+# (published self-contained by azure-pipelines.yml, so it does not need a runtime).
+parameters:
+- name: jobName
+  type: string
+  default: ShardedTests
+- name: displayName
+  type: string
+  default: Sharded tests
+- name: dependsOn
+  type: object
+  default: []
+- name: pool
+  type: object
+  default:
+    name: Default
+- name: totalShards
+  type: number
+  default: 4
+# Steps that make the tool and the test assembly available on the agent, such as 'download' steps
+- name: prepareSteps
+  type: stepList
+  default: []
+# Path of xunit-shard.exe on the agent
+- name: toolPath
+  type: string
+# Path of the test assembly (.exe) on the agent
+- name: testAssembly
+  type: string
+# xUnit.net v3 4.x: -result-junit, earlier versions: -junit
+- name: junitSwitch
+  type: string
+  default: -result-junit
+# Additional arguments for the test assembly (filters, -maxThreads, ...), used to list and to run the tests
+- name: testArguments
+  type: string
+  default: ''
+- name: testRunTitle
+  type: string
+  default: Tests
+- name: timeoutInMinutes
+  type: number
+  default: 60
+
+jobs:
+- job: ${{ parameters.jobName }}
+  displayName: ${{ parameters.displayName }}
+  dependsOn: ${{ parameters.dependsOn }}
+  pool: ${{ parameters.pool }}
+  timeoutInMinutes: ${{ parameters.timeoutInMinutes }}
+  strategy:
+    # Sets System.JobPositionInPhase (1..N) and System.TotalJobsInPhase (N) for each job
+    parallel: ${{ parameters.totalShards }}
+  steps:
+  - ${{ each step in parameters.prepareSteps }}:
+    - ${{ step }}
+
+  # cmd rather than PowerShell: Windows PowerShell drops the '--' separator when calling an executable
+  - script: >-
+      "${{ parameters.toolPath }}"
+      --shard-index $(System.JobPositionInPhase)
+      --total-shards $(System.TotalJobsInPhase)
+      "${{ parameters.testAssembly }}"
+      --
+      ${{ parameters.junitSwitch }} "$(Common.TestResultsDirectory)\xunit-shard-$(System.JobPositionInPhase).xml"
+      ${{ parameters.testArguments }}
+    displayName: Run shard $(System.JobPositionInPhase)/$(System.TotalJobsInPhase)
+
+  - task: PublishTestResults@2
+    displayName: Publish test results
+    condition: succeededOrFailed()
+    inputs:
+      testResultsFormat: JUnit
+      testResultsFiles: xunit-shard-*.xml
+      searchFolder: $(Common.TestResultsDirectory)
+      testRunTitle: ${{ parameters.testRunTitle }} (shard $(System.JobPositionInPhase)/$(System.TotalJobsInPhase))

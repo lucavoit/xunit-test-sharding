@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>xunit-shard</AssemblyName>
+    <RootNamespace>XunitTestSharding</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Reflection.MetadataLoadContext" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="XunitTestSharding.Tests" />
+  </ItemGroup>
+
+</Project>

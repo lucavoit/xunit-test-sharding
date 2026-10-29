@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <SampleAssemblyPath>$(MSBuildThisFileDirectory)../../samples/Reqnroll.Sample/bin/$(Configuration)/$(TargetFramework)/Reqnroll.Sample.dll</SampleAssemblyPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\XunitTestSharding\XunitTestSharding.csproj" />
+    <!-- Built for the end-to-end tests, which shard it -->
+    <ProjectReference Include="..\..\samples\Reqnroll.Sample\Reqnroll.Sample.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>SampleAssemblyPath</_Parameter1>
+      <_Parameter2>$([System.IO.Path]::GetFullPath($(SampleAssemblyPath)))</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+</Project>
