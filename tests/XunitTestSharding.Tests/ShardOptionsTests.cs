@@ -75,4 +75,10 @@ public sealed class ShardOptionsTests
     {
         Assert.Throws<HelpRequestedException>(() => ShardOptions.Parse(["--help"], s_noEnvironment));
     }
+
+    [Fact]
+    public void Version()
+    {
+        Assert.Throws<VersionRequestedException>(() => ShardOptions.Parse(["--version"], s_noEnvironment));
+    }
 }

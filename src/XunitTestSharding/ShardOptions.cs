@@ -29,6 +29,7 @@ internal sealed record ShardOptions(
                                (default: %SYSTEM_TOTALJOBSINPHASE%)
           --dry-run            print the shard plan and the selected tests without running them
           --verbose            print the command lines that are executed
+          --version            show the version of xunit-shard
           -h, --help           show this help
 
         Every argument after '--' is passed to the test assembly, both when listing and when running
@@ -72,6 +73,9 @@ internal sealed record ShardOptions(
 
                 case "-h" or "--help" or "-?":
                     throw new HelpRequestedException();
+
+                case "--version":
+                    throw new VersionRequestedException();
 
                 default:
                     if (arg.StartsWith('-'))
@@ -123,3 +127,5 @@ internal sealed record ShardOptions(
 internal sealed class UsageException(string message) : Exception(message);
 
 internal sealed class HelpRequestedException() : Exception("Help requested.");
+
+internal sealed class VersionRequestedException() : Exception("Version requested.");

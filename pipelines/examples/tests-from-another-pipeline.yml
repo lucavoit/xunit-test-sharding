@@ -35,6 +35,13 @@ jobs:
     - download: xunitShard
       artifact: xunit-shard
       displayName: Download xunit-shard
+    # Alternative: take xunit-shard from a GitHub release (built by .github/workflows/build.yml) instead of the
+    # 'xunitShard' pipeline resource, and use toolPath: $(Agent.TempDirectory)\xunit-shard\xunit-shard.exe
+    # (a private repository needs an 'Authorization' header with a token that can read it)
+    # - powershell: |
+    #     Invoke-WebRequest -Uri https://github.com/lucavoit/xunit-test-sharding/releases/download/v1.0.0/xunit-shard-win-x64.zip -OutFile "$(Agent.TempDirectory)\xunit-shard.zip"
+    #     Expand-Archive -Path "$(Agent.TempDirectory)\xunit-shard.zip" -DestinationPath "$(Agent.TempDirectory)\xunit-shard"
+    #   displayName: Download xunit-shard
     toolPath: $(Pipeline.Workspace)\xunitShard\xunit-shard\xunit-shard.exe
     testAssembly: $(Pipeline.Workspace)\tests\drop\MyProduct.AcceptanceTests.exe
     # For instance, exclude tests tagged @manual in Reqnroll (tags are xUnit traits named 'Category')

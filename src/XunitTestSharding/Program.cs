@@ -1,3 +1,4 @@
+using System.Reflection;
 using XunitTestSharding;
 
 using var cancellation = new CancellationTokenSource();
@@ -11,6 +12,11 @@ try
 {
     var options = ShardOptions.Parse(args, Environment.GetEnvironmentVariable);
     return await ShardRunner.RunAsync(options, Console.Out, cancellation.Token);
+}
+catch (VersionRequestedException)
+{
+    Console.WriteLine(typeof(ShardOptions).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion);
+    return 0;
 }
 catch (HelpRequestedException)
 {

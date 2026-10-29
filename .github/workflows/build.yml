@@ -1,0 +1,96 @@
+# Builds and tests xunit-shard, then publishes it self-contained for Windows and Linux.
+# - every run uploads the published tool as workflow artifacts (xunit-shard-win-x64, xunit-shard-linux-x64)
+# - a tag 'v*' (for instance v1.0.0) also creates a GitHub release with the zipped tool attached
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+
+    - uses: actions/setup-dotnet@v6
+      with:
+        dotnet-version: 10.0.x
+
+    - name: Compute version
+      id: version
+      shell: bash
+      run: |
+        if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+          version="${GITHUB_REF_NAME#v}"
+        else
+          version="0.0.0-ci.${GITHUB_RUN_NUMBER}"
+        fi
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+
+    - name: Build
+      run: dotnet build XunitTestSharding.slnx --configuration Release -p:Version=${{ steps.version.outputs.version }}
+
+    - name: Test
+      run: dotnet test --solution XunitTestSharding.slnx --configuration Release --no-build
+
+    # Self-contained, so the agents running the tests do not need a .NET runtime for the tool
+    - name: Publish
+      shell: bash
+      run: |
+        for rid in win-x64 linux-x64; do
+          dotnet publish src/XunitTestSharding \
+            --configuration Release \
+            --runtime "$rid" \
+            --self-contained \
+            -p:Version=${{ steps.version.outputs.version }} \
+            --output "artifacts/xunit-shard-$rid"
+        done
+
+    - name: Upload xunit-shard-win-x64
+      uses: actions/upload-artifact@v7
+      with:
+        name: xunit-shard-win-x64
+        path: artifacts/xunit-shard-win-x64
+        if-no-files-found: error
+
+    - name: Upload xunit-shard-linux-x64
+      uses: actions/upload-artifact@v7
+      with:
+        name: xunit-shard-linux-x64
+        path: artifacts/xunit-shard-linux-x64
+        if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/download-artifact@v8
+      with:
+        path: artifacts
+
+    - name: Zip
+      shell: bash
+      run: |
+        for directory in artifacts/*/; do
+          name="$(basename "$directory")"
+          (cd "$directory" && zip -qr "$GITHUB_WORKSPACE/$name.zip" .)
+        done
+
+    - name: Create release
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: gh release create "$GITHUB_REF_NAME" xunit-shard-*.zip --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
