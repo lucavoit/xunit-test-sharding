@@ -46,3 +46,7 @@ jobs:
     testAssembly: $(Pipeline.Workspace)\tests\drop\MyProduct.AcceptanceTests.exe
     # For instance, exclude tests tagged @manual in Reqnroll (tags are xUnit traits named 'Category')
     testArguments: -trait- "Category=manual"
+    # With a test project built with <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>,
+    # the arguments can use the Microsoft.Testing.Platform command line instead:
+    # runner: mtp
+    # testArguments: --filter-not-trait "Category=manual"

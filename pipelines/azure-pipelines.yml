@@ -80,3 +80,30 @@ stages:
         displayName: Download sample tests
       toolPath: $(Pipeline.Workspace)\xunit-shard\xunit-shard.exe
       testAssembly: $(Pipeline.Workspace)\sample-tests\Reqnroll.Sample.exe
+
+  # The sample uses Microsoft.Testing.Platform, so it can also be sharded with Microsoft.Testing.Platform arguments
+  - template: templates/xunit-shard-job.yml
+    parameters:
+      jobName: ShardedTestsMtp
+      displayName: Reqnroll sample (Microsoft.Testing.Platform)
+      pool:
+        name: ${{ parameters.agentPool }}
+      totalShards: ${{ parameters.totalShards }}
+      runner: mtp
+      testRunTitle: Reqnroll sample (Microsoft.Testing.Platform)
+      testArguments: --filter-not-trait "Category=manual"
+      prepareSteps:
+      - checkout: none
+      - task: UseDotNet@2
+        displayName: Install .NET runtime
+        inputs:
+          packageType: runtime
+          version: 10.0.x
+      - download: current
+        artifact: xunit-shard
+        displayName: Download xunit-shard
+      - download: current
+        artifact: sample-tests
+        displayName: Download sample tests
+      toolPath: $(Pipeline.Workspace)\xunit-shard\xunit-shard.exe
+      testAssembly: $(Pipeline.Workspace)\sample-tests\Reqnroll.Sample.exe

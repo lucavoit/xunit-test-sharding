@@ -30,10 +30,22 @@ parameters:
 # Path of the test assembly (.exe) on the agent
 - name: testAssembly
   type: string
-# xUnit.net v3 4.x: -result-junit, earlier versions: -junit
+# Command line of the test assembly used by junitSwitch and testArguments:
+# - xunit: xUnit.net command line (-junit, -trait-, ...)
+# - mtp:   Microsoft.Testing.Platform command line (--report-junit, --filter-not-trait, ...), for test projects
+#          built with <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
+- name: runner
+  type: string
+  default: xunit
+  values:
+  - xunit
+  - mtp
+# Switch that enables the JUnit report. Empty: the xUnit.net v3 4.x switch of the runner.
+#   xunit: -junit (3.x), -result-junit (4.x)
+#   mtp:   --report-junit (3.x), --report-xunit-junit (4.x); '<switch>-filename' sets the file name
 - name: junitSwitch
   type: string
-  default: -result-junit
+  default: ''
 # Additional arguments for the test assembly (filters, -maxThreads, ...), used to list and to run the tests
 - name: testArguments
   type: string
@@ -59,15 +71,31 @@ jobs:
     - ${{ step }}
 
   # cmd rather than PowerShell: Windows PowerShell drops the '--' separator when calling an executable
-  - script: >-
-      "${{ parameters.toolPath }}"
-      --shard-index $(System.JobPositionInPhase)
-      --total-shards $(System.TotalJobsInPhase)
-      "${{ parameters.testAssembly }}"
-      --
-      ${{ parameters.junitSwitch }} "$(Common.TestResultsDirectory)\xunit-shard-$(System.JobPositionInPhase).xml"
-      ${{ parameters.testArguments }}
-    displayName: Run shard $(System.JobPositionInPhase)/$(System.TotalJobsInPhase)
+  - ${{ if eq(parameters.runner, 'xunit') }}:
+    - script: >-
+        "${{ parameters.toolPath }}"
+        --runner xunit
+        --shard-index $(System.JobPositionInPhase)
+        --total-shards $(System.TotalJobsInPhase)
+        "${{ parameters.testAssembly }}"
+        --
+        ${{ coalesce(parameters.junitSwitch, '-result-junit') }} "$(Common.TestResultsDirectory)\xunit-shard-$(System.JobPositionInPhase).xml"
+        ${{ parameters.testArguments }}
+      displayName: Run shard $(System.JobPositionInPhase)/$(System.TotalJobsInPhase)
+
+  - ${{ if eq(parameters.runner, 'mtp') }}:
+    - script: >-
+        "${{ parameters.toolPath }}"
+        --runner mtp
+        --shard-index $(System.JobPositionInPhase)
+        --total-shards $(System.TotalJobsInPhase)
+        "${{ parameters.testAssembly }}"
+        --
+        ${{ coalesce(parameters.junitSwitch, '--report-xunit-junit') }}
+        ${{ coalesce(parameters.junitSwitch, '--report-xunit-junit') }}-filename xunit-shard-$(System.JobPositionInPhase).xml
+        --results-directory "$(Common.TestResultsDirectory)"
+        ${{ parameters.testArguments }}
+      displayName: Run shard $(System.JobPositionInPhase)/$(System.TotalJobsInPhase)
 
   - task: PublishTestResults@2
     displayName: Publish test results
