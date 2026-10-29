@@ -4,7 +4,10 @@ using Xunit;
 
 namespace XunitTestSharding.Tests;
 
-/// <summary>Shards the Reqnroll sample project.</summary>
+/// <summary>
+/// Shards the Reqnroll sample project, with both command lines: the sample uses Microsoft.Testing.Platform, and its
+/// executable also runs the xUnit.net runner when it gets '@@ response-file'.
+/// </summary>
 public sealed class EndToEndTests
 {
     private const int SampleTestCount = 24;
@@ -24,13 +27,15 @@ public sealed class EndToEndTests
     ];
 
     [Theory]
-    [InlineData(1)]
-    [InlineData(2)]
-    [InlineData(5)]
-    [InlineData(30)]
-    public async Task PlansEveryTestOfTheSampleOnce(int totalShards)
+    [InlineData(1, "xunit")]
+    [InlineData(2, "xunit")]
+    [InlineData(5, "xunit")]
+    [InlineData(30, "xunit")]
+    [InlineData(1, "mtp")]
+    [InlineData(5, "mtp")]
+    public async Task PlansEveryTestOfTheSampleOnce(int totalShards, string runner)
     {
-        var (plan, warnings) = await CreatePlanAsync(totalShards);
+        var (plan, warnings, _) = await CreatePlanAsync(s_samplePath, totalShards, runner);
 
         Assert.Empty(warnings);
         Assert.Equal(SampleTestCount, plan.TotalTests);
@@ -39,12 +44,39 @@ public sealed class EndToEndTests
         Assert.Superset(s_serialTests.ToHashSet(), plan.Shards[0].Select(test => test.DisplayName).ToHashSet());
     }
 
-    [Fact]
-    public async Task ScenarioOutlineExamplesAreSeparateTests()
+    [Theory]
+    [InlineData("xunit")]
+    [InlineData("mtp")]
+    public async Task ScenarioOutlineExamplesAreSeparateTests(string runner)
     {
-        var (plan, _) = await CreatePlanAsync(totalShards: 1);
+        var (plan, _, _) = await CreatePlanAsync(s_samplePath, totalShards: 1, runner);
 
         Assert.Equal(6, plan.Shards[0].Count(test => test.MethodName == "AddManyNumbers"));
+    }
+
+    [Fact]
+    public async Task BothCommandLinesGiveTheSamePlan()
+    {
+        var (xunitPlan, _, _) = await CreatePlanAsync(s_samplePath, totalShards: 3, "xunit");
+        var (mtpPlan, _, _) = await CreatePlanAsync(s_samplePath, totalShards: 3, "mtp");
+
+        Assert.Equal(xunitPlan.Fingerprint, mtpPlan.Fingerprint);
+        Assert.Equal(
+            xunitPlan.Shards.Select(shard => shard.Select(test => (test.Id, test.DisplayName, test.ClassName, test.MethodName)).ToList()),
+            mtpPlan.Shards.Select(shard => shard.Select(test => (test.Id, test.DisplayName, test.ClassName, test.MethodName)).ToList()));
+    }
+
+    [Theory]
+    [InlineData("xunit", new[] { "-trait-", "Category=nonparallel" })]
+    [InlineData("mtp", new[] { "--filter-not-trait", "Category=nonparallel" })]
+    public async Task FiltersApplyToThePlan(string runner, string[] filter)
+    {
+        var (plan, _, filtersApplied) = await CreatePlanAsync(s_samplePath, totalShards: 2, runner, filter);
+
+        Assert.True(filtersApplied);
+        Assert.Equal(SampleTestCount - 2, plan.TotalTests);
+        Assert.DoesNotContain(plan.Shards.SelectMany(shard => shard), test => test.ClassName == "Reqnroll.Sample.Features.DatabaseFeature");
+        Assert.Equal(3, plan.SerialTests.Count);
     }
 
     [Fact]
@@ -62,8 +94,8 @@ public sealed class EndToEndTests
                 File.Copy(file, destination);
             }
 
-            var (plan, _) = await CreatePlanAsync(s_samplePath, totalShards: 3);
-            var (copyPlan, _) = await CreatePlanAsync(Path.Combine(copy.FullName, Path.GetFileName(s_samplePath)), totalShards: 3);
+            var (plan, _, _) = await CreatePlanAsync(s_samplePath, totalShards: 3, "xunit");
+            var (copyPlan, _, _) = await CreatePlanAsync(Path.Combine(copy.FullName, Path.GetFileName(s_samplePath)), totalShards: 3, "xunit");
 
             Assert.NotEqual(plan.Shards[0][0].Id, copyPlan.Shards[0][0].Id);
             Assert.Equal(plan.Fingerprint, copyPlan.Fingerprint);
@@ -77,8 +109,10 @@ public sealed class EndToEndTests
         }
     }
 
-    [Fact]
-    public async Task RunsEachShardWithItsOwnTests()
+    [Theory]
+    [InlineData("xunit")]
+    [InlineData("mtp")]
+    public async Task RunsEachShardWithItsOwnTests(string runner)
     {
         const int TotalShards = 3;
         var resultsDirectory = Directory.CreateTempSubdirectory("xunit-shard-tests-");
@@ -88,7 +122,10 @@ public sealed class EndToEndTests
             for (var shardIndex = 1; shardIndex <= TotalShards; shardIndex++)
             {
                 var junitPath = Path.Combine(resultsDirectory.FullName, $"shard-{shardIndex}.xml");
-                var options = new ShardOptions(s_samplePath, shardIndex, TotalShards, ["-result-junit", junitPath], DryRun: false, Verbose: false);
+                string[] reportArguments = runner == "xunit"
+                    ? ["-result-junit", junitPath]
+                    : ["--report-xunit-junit", "--report-xunit-junit-filename", Path.GetFileName(junitPath), "--results-directory", resultsDirectory.FullName];
+                var options = new ShardOptions(s_samplePath, shardIndex, TotalShards, reportArguments, DryRun: false, Verbose: false, ToRunner(runner));
 
                 var exitCode = await ShardRunner.RunAsync(options, TextWriter.Null, TestContext.Current.CancellationToken);
 
@@ -110,12 +147,12 @@ public sealed class EndToEndTests
         }
     }
 
-    private static Task<(ShardPlan Plan, IReadOnlyList<string> Warnings)> CreatePlanAsync(int totalShards) =>
-        CreatePlanAsync(s_samplePath, totalShards);
+    private static TestRunner ToRunner(string runner) =>
+        runner == "xunit" ? TestRunner.Xunit : TestRunner.MicrosoftTestingPlatform;
 
-    private static Task<(ShardPlan Plan, IReadOnlyList<string> Warnings)> CreatePlanAsync(string samplePath, int totalShards)
+    private static Task<DiscoveryResult> CreatePlanAsync(string samplePath, int totalShards, string runner, string[]? testArguments = null)
     {
-        var options = new ShardOptions(samplePath, ShardIndex: 1, totalShards, [], DryRun: true, Verbose: false);
+        var options = new ShardOptions(samplePath, ShardIndex: 1, totalShards, testArguments ?? [], DryRun: true, Verbose: false, ToRunner(runner));
         return ShardRunner.CreatePlanAsync(new TestAssembly(samplePath), options, TestContext.Current.CancellationToken);
     }
 }

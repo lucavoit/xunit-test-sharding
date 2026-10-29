@@ -16,6 +16,7 @@ internal sealed class TestAssembly
             throw new FileNotFoundException($"The test assembly '{Path}' does not exist.", Path);
 
         ManagedAssemblyPath = GetManagedAssemblyPath(Path);
+        XunitVersion = GetXunitVersion(System.IO.Path.GetDirectoryName(ManagedAssemblyPath)!);
     }
 
     public string Path { get; }
@@ -28,26 +29,24 @@ internal sealed class TestAssembly
     /// </summary>
     public string ManagedAssemblyPath { get; }
 
+    /// <summary>The version of xunit.v3.core next to the test assembly, if it can be read.</summary>
+    public Version? XunitVersion { get; }
+
     private bool IsDll => Path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Runs the test assembly with the given arguments. They are passed through a response file
-    /// ('@@ file', supported by every xUnit.net v3 version) so that the length of the command line
-    /// does not limit the number of tests that can be selected.
+    /// Runs the test assembly with the given arguments. They are passed through a response file so that the
+    /// length of the command line does not limit the number of tests that can be selected:
+    /// '@@ file' for the xUnit.net runner (every xUnit.net v3 version, also when the test project uses
+    /// Microsoft.Testing.Platform), '@file' for Microsoft.Testing.Platform.
     /// </summary>
-    public async Task<ProcessResult> RunAsync(IReadOnlyList<string> arguments, bool captureOutput, bool verbose, CancellationToken cancellationToken)
+    public async Task<ProcessResult> RunAsync(TestRunner runner, IReadOnlyList<string> arguments, bool captureOutput, bool verbose, CancellationToken cancellationToken)
     {
+        var lines = GetResponseFileLines(runner, arguments);
         var responseFile = System.IO.Path.GetTempFileName();
         try
         {
-            // The runner trims each line and ignores empty lines, so every argument must be a single, trimmed line
-            foreach (var argument in arguments)
-            {
-                if (argument.Length == 0 || argument.Trim().Length != argument.Length || argument.AsSpan().ContainsAny('\r', '\n'))
-                    throw new ArgumentException($"The argument '{argument}' cannot be passed to the test assembly: arguments must not be empty, contain line breaks, or start or end with whitespace.");
-            }
-
-            await File.WriteAllLinesAsync(responseFile, arguments, cancellationToken);
+            await File.WriteAllLinesAsync(responseFile, lines, cancellationToken);
 
             var startInfo = new ProcessStartInfo
             {
@@ -60,8 +59,15 @@ internal sealed class TestAssembly
             if (IsDll)
                 startInfo.ArgumentList.Add(Path);
 
-            startInfo.ArgumentList.Add("@@");
-            startInfo.ArgumentList.Add(responseFile);
+            if (runner is TestRunner.MicrosoftTestingPlatform)
+            {
+                startInfo.ArgumentList.Add("@" + responseFile);
+            }
+            else
+            {
+                startInfo.ArgumentList.Add("@@");
+                startInfo.ArgumentList.Add(responseFile);
+            }
 
             if (captureOutput)
             {
@@ -73,8 +79,8 @@ internal sealed class TestAssembly
             if (verbose)
             {
                 Console.WriteLine($"> {string.Join(' ', startInfo.ArgumentList.Prepend(startInfo.FileName).Select(Quote))}");
-                foreach (var argument in arguments)
-                    Console.WriteLine($">   {argument}");
+                foreach (var line in lines)
+                    Console.WriteLine($">   {line}");
             }
 
             using var process = Process.Start(startInfo) ?? throw new InvalidOperationException($"Cannot start '{startInfo.FileName}'.");
@@ -98,6 +104,47 @@ internal sealed class TestAssembly
         {
             File.Delete(responseFile);
         }
+    }
+
+    internal static List<string> GetResponseFileLines(TestRunner runner, IReadOnlyList<string> arguments)
+    {
+        var lines = new List<string>(arguments.Count);
+        foreach (var argument in arguments)
+        {
+            if (argument.Length == 0 || argument.AsSpan().ContainsAny('\r', '\n'))
+                throw new ArgumentException($"The argument '{argument}' cannot be passed to the test assembly: arguments must not be empty or contain line breaks.");
+
+            if (runner is TestRunner.MicrosoftTestingPlatform)
+            {
+                // Microsoft.Testing.Platform splits the lines on whitespace, except between double quotes
+                if (argument.Contains('"', StringComparison.Ordinal))
+                    throw new ArgumentException($"The argument '{argument}' cannot be passed to the test assembly: Microsoft.Testing.Platform arguments must not contain double quotes.");
+
+                lines.Add(argument.AsSpan().ContainsAny(' ', '\t') ? '"' + argument + '"' : argument);
+            }
+            else
+            {
+                // The xUnit.net runner trims each line and ignores empty lines: one line is one argument
+                if (argument.Trim().Length != argument.Length)
+                    throw new ArgumentException($"The argument '{argument}' cannot be passed to the test assembly: xUnit.net arguments must not start or end with whitespace.");
+
+                lines.Add(argument);
+            }
+        }
+
+        return lines;
+    }
+
+    private static Version? GetXunitVersion(string directory)
+    {
+        var path = System.IO.Path.Combine(directory, "xunit.v3.core.dll");
+        if (!File.Exists(path))
+            return null;
+
+        // For instance '4.0.2+0c7aa4991f' or '4.1.0-pre.12'
+        var productVersion = FileVersionInfo.GetVersionInfo(path).ProductVersion;
+        var end = productVersion?.IndexOfAny(['+', '-']) ?? -1;
+        return Version.TryParse(end < 0 ? productVersion : productVersion![..end], out var version) ? version : null;
     }
 
     private static string GetManagedAssemblyPath(string path)

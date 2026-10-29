@@ -11,8 +11,8 @@ xUnit.net v3 and Reqnroll:
 
 | | Meziantou.ShardedTest | xunit-shard |
 | --- | --- | --- |
-| Runs the tests with | `dotnet test` | the compiled test executable, with any xUnit.net option (`-junit`, filters, ...) |
-| Selects tests by | display name (`--filter DisplayName=...`) | unique test case ID (`-id`) |
+| Runs the tests with | `dotnet test` | the compiled test executable, with xUnit.net arguments (`-junit`, `-trait-`, ...) or Microsoft.Testing.Platform arguments (`--report-junit`, `--filter-not-trait`, ...) |
+| Selects tests by | display name (`--filter DisplayName=...`) | unique test case ID (`-id` or `--filter-uid`) |
 | Smallest unit | test case | test case: every theory data row and every example of a scenario outline |
 | Collections that disable parallelization | can be split | always kept on one shard |
 | Reqnroll non-parallelizable features | can be split | always kept on one shard |
@@ -24,6 +24,7 @@ xUnit.net v3 and Reqnroll:
 - [How it works](#how-it-works)
 - [Sharding rules](#sharding-rules)
 - [Usage](#usage)
+- [xUnit.net and Microsoft.Testing.Platform command lines](#xunitnet-and-microsofttestingplatform-command-lines)
 - [Getting the tool](#getting-the-tool)
 - [Azure DevOps](#azure-devops)
 - [Requirements and limitations](#requirements-and-limitations)
@@ -60,9 +61,9 @@ its own part:
 
 ```mermaid
 flowchart TD
-    start(["xunit-shard<br/>--shard-index i<br/>--total-shards N<br/>MyTests.exe<br/>-- -junit results.xml"])
+    start(["xunit-shard<br/>--shard-index i<br/>--total-shards N<br/>MyTests.exe<br/>-- test arguments"])
 
-    start --> discover["<b>1. Discover</b><br/>MyTests.exe -list full/json<br/>-preEnumerateTheories<br/>+ xUnit arguments after --"]
+    start --> discover["<b>1. Discover</b><br/>with the test arguments<br/>xunit: -list full/json<br/>mtp: --xunit-list full<br/>theories pre-enumerated"]
     start --> inspect["<b>2. Read the test collections</b><br/>MetadataLoadContext on MyTests.dll<br/>no test code is executed"]
 
     discover --> tests[("test cases<br/>ID, class, method, display name")]
@@ -81,25 +82,29 @@ flowchart TD
     end
 
     plan --> select["<b>4. Select</b> shard i<br/>print the plan fingerprint<br/>and the tests per shard"]
-    select --> response["write a response file:<br/>-preEnumerateTheories,<br/>the xUnit arguments,<br/>one -id per selected test"]
-    response --> run["<b>5. Run</b><br/>MyTests.exe<br/>@@ response-file"]
+    select --> response["write a response file:<br/>theory pre-enumeration,<br/>the test arguments,<br/>xunit: one -id per test<br/>mtp: --filter-uid and the IDs"]
+    response --> run["<b>5. Run</b><br/>xunit: MyTests.exe @@ file<br/>mtp: MyTests.exe @file"]
     run --> output(["results.xml<br/>+ exit code of the test run"])
 ```
 
-1. **Discover.** `xunit-shard` runs the test executable with `-list full/json -preEnumerateTheories`. Theories are not
-   pre-enumerated by default in xUnit.net v3: without this switch, a theory (and so a Reqnroll scenario outline,
-   which is generated as a theory) would be a single test case. The arguments after `--` are passed too, so filters
-   apply.
+1. **Discover.** `xunit-shard` lists the tests of the test executable with theory pre-enumeration:
+   `-list full/json -preEnumerateTheories` with the xUnit.net command line, `--xunit-list full
+   --pre-enumerate-theories on` with Microsoft.Testing.Platform (see
+   [command lines](#xunitnet-and-microsofttestingplatform-command-lines)). Without pre-enumeration, a theory (and so
+   a Reqnroll scenario outline, which is generated as a theory) would be a single test case. The arguments after `--`
+   are passed too, so filters apply.
 2. **Read the test collections.** `-list` does not report the test collection of a test. `xunit-shard` reads them from
    the metadata of the test assembly with `MetadataLoadContext`, following the xUnit.net rules (see
    [Collections](#collections-that-disable-parallelization)).
 3. **Plan.** It splits the tests into N shards (see [Sharding rules](#sharding-rules)). Every agent computes the plan
    from the same test executable, so every agent gets the same plan without any coordination.
 4. **Select.** It prints a summary, including a fingerprint of the plan, and keeps the tests of shard *i*.
-5. **Run.** It runs the test executable once, with `-preEnumerateTheories` (needed for the IDs to match the
-   discovery), the arguments after `--`, and `-id <id>` for each selected test. The arguments go through an xUnit.net
-   response file (`@@ <file>`), so the number of tests is not limited by the length of the command line. Each shard
-   produces exactly one report, and `xunit-shard` returns the exit code of the test run.
+5. **Run.** It runs the test executable once, with theory pre-enumeration (needed for the IDs to match the
+   discovery), the arguments after `--`, and the IDs of the selected tests: `-id <id>` for each test with the xUnit.net
+   command line, `--filter-uid <id> <id> ...` with Microsoft.Testing.Platform. The arguments go through a response
+   file (`@@ <file>` for xUnit.net, `@<file>` for Microsoft.Testing.Platform), so the number of tests is not limited
+   by the length of the command line. Each shard produces exactly one report, and `xunit-shard` returns the exit code
+   of the test run.
 
 ## Sharding rules
 
@@ -170,7 +175,7 @@ with 2 scenario outlines, plus xUnit facts, theories and collections. With 3 sha
 | 3 | last example of *Stock is reduced when an item is sold*, `ParallelTests` (1 fact, 4 theory rows), `SharedFixtureTests` (named collection running in parallel, 2) |
 
 ```
-xunit-shard: Reqnroll.Sample: 24 tests in 3 shards (plan 50e42e728534)
+xunit-shard: Reqnroll.Sample: 24 tests in 3 shards (plan 50e42e728534, xUnit.net runner)
 xunit-shard: 5 tests of collections that disable parallelization are kept on shard 1: ExclusiveCollection (1), ReqnrollNonParallelizableFeatures (2), Serial (2)
 xunit-shard: tests per shard: 1=8, 2=8, 3=8
 xunit-shard: running shard 2/3: 8 tests
@@ -179,7 +184,7 @@ xunit-shard: running shard 2/3: 8 tests
 ## Usage
 
 ```
-xunit-shard [options] <test-assembly> [-- <xunit arguments>]
+xunit-shard [options] <test-assembly> [-- <test arguments>]
 ```
 
 | Option | Description |
@@ -187,11 +192,12 @@ xunit-shard [options] <test-assembly> [-- <xunit arguments>]
 | `<test-assembly>` | The test executable (`MyTests.exe`, or the app host without extension on Linux/macOS), or its `.dll` (run with `dotnet`). |
 | `--shard-index <n>` | 1-based index of the shard to run. Defaults to the `SYSTEM_JOBPOSITIONINPHASE` environment variable (set by Azure DevOps). |
 | `--total-shards <n>` | Total number of shards. Defaults to `SYSTEM_TOTALJOBSINPHASE` (set by Azure DevOps). |
+| `--runner <auto\|xunit\|mtp>` | Command line that the test arguments use: `xunit` (xUnit.net), `mtp` (Microsoft.Testing.Platform), or `auto` (default): `mtp` when a test argument starts with `--`, `xunit` otherwise. See [command lines](#xunitnet-and-microsofttestingplatform-command-lines). |
 | `--dry-run` | Print the plan and the tests of the shard (ID and display name) without running them. |
 | `--verbose` | Print the command lines and the arguments passed to the test executable. |
 | `--version` | Print the version of `xunit-shard`. |
 | `-h`, `--help` | Show the help. |
-| `-- <xunit arguments>` | Everything after `--` is passed to the test executable, **both** when listing and when running the tests. |
+| `-- <test arguments>` | Everything after `--` is passed to the test executable, **both** when listing and when running the tests. |
 
 Examples:
 
@@ -205,6 +211,9 @@ xunit-shard --shard-index 2 --total-shards 4 MyTests.exe -- -result-junit result
 # Exclude the scenarios tagged @manual (Reqnroll tags are xUnit traits named "Category") on every shard
 xunit-shard --shard-index 1 --total-shards 4 MyTests.exe -- -junit results.xml -trait- "Category=manual"
 
+# Microsoft.Testing.Platform arguments (the test project uses UseMicrosoftTestingPlatformRunner)
+xunit-shard --shard-index 1 --total-shards 4 MyTests.exe -- --report-xunit-junit --report-xunit-junit-filename results.xml --results-directory out --filter-not-trait "Category=manual"
+
 # Look at the plan without running anything
 xunit-shard --shard-index 1 --total-shards 4 --dry-run MyTests.exe
 ```
@@ -213,10 +222,44 @@ Exit codes:
 
 | Code | Meaning |
 | --- | --- |
-| exit code of the test run | the shard was run (0 when all its tests passed) |
+| exit code of the test run | the shard was run: 0 when all its tests passed; with Microsoft.Testing.Platform, [its exit codes](https://aka.ms/testingplatform/exitcodes) (2 when tests failed, 8 when no test ran) |
 | 0 | the shard has no tests (more shards than tests), or `--dry-run`, `--help`, `--version` |
 | 1 | the tests could not be listed, or the test assembly could not be read |
 | 2 | invalid command line |
+
+## xUnit.net and Microsoft.Testing.Platform command lines
+
+An xUnit.net v3 test executable has two command lines:
+
+- the **xUnit.net** command line (`-junit results.xml`, `-trait- "Category=manual"`, ...), the default when the
+  executable is run directly;
+- the **Microsoft.Testing.Platform** (MTP) command line (`--report-junit`, `--filter-not-trait "Category=manual"`,
+  ...), when the test project is built with `<UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>`.
+  Such an executable still runs the xUnit.net command line when it gets an `@@ <file>` response file.
+
+`xunit-shard` lists and runs the tests with the command line used by the arguments after `--`. `--runner auto` (the
+default) picks Microsoft.Testing.Platform when one of them starts with `--` (all MTP options do, no xUnit.net option
+does), the xUnit.net command line otherwise. `--runner xunit` and `--runner mtp` force it.
+
+| | xUnit.net (`--runner xunit`) | Microsoft.Testing.Platform (`--runner mtp`) |
+| --- | --- | --- |
+| Test project | any (UseMicrosoftTestingPlatformRunner or not) | built with `UseMicrosoftTestingPlatformRunner` |
+| List | `@@ <file>` with `-list full/json -preEnumerateTheories` | `@<file>` with `--xunit-list full --pre-enumerate-theories on` |
+| Run | `@@ <file>` with `-preEnumerateTheories` and `-id <id>` per test | `@<file>` with `--pre-enumerate-theories on` and `--filter-uid <id> <id> ...` |
+| JUnit report, xUnit.net v3 4.x | `-result-junit results.xml` | `--report-xunit-junit --report-xunit-junit-filename results.xml` |
+| JUnit report, xUnit.net v3 3.x | `-junit results.xml` | `--report-junit --report-junit-filename results.xml` |
+| Exclude a Reqnroll tag | `-trait- "Category=manual"` | `--filter-not-trait "Category=manual"` |
+
+With Microsoft.Testing.Platform, the report file name is relative to the results directory (`--results-directory`,
+`TestResults` next to the executable by default). `xunit-shard` sets `--filter-uid` and `--pre-enumerate-theories`
+itself, so they can't be among the test arguments. Arguments can't contain double quotes, because Microsoft.Testing.Platform
+response files have no way to escape them.
+
+**xUnit.net v3 3.x.** Microsoft.Testing.Platform can only list the tests from xUnit.net v3 4.0 (`--xunit-list`). With
+an older version, `xunit-shard` lists the tests with the xUnit.net command line of the same executable (the IDs are
+the same), but without the test arguments, since they are MTP arguments. Filters then only apply when each shard runs:
+the plan includes the tests they exclude, so the shards can be unbalanced, and `--ignore-exit-code 8` is added so that
+a shard whose tests are all filtered out doesn't fail. A warning says so.
 
 ## Getting the tool
 
@@ -251,8 +294,9 @@ The [Azure DevOps pipeline](pipelines/azure-pipelines.yml) of this repository pu
 
 1. runs your `prepareSteps`, which put the tool and the tests on the agent (download steps);
 2. runs `xunit-shard --shard-index $(System.JobPositionInPhase) --total-shards $(System.TotalJobsInPhase)`, with a
-   JUnit report in `$(Common.TestResultsDirectory)`. It uses cmd, because Windows PowerShell drops the `--`
-   separator;
+   JUnit report in `$(Common.TestResultsDirectory)`: `<junitSwitch> <file>` with `runner: xunit`,
+   `<junitSwitch> <junitSwitch>-filename <file> --results-directory <directory>` with `runner: mtp`. It uses cmd,
+   because Windows PowerShell drops the `--` separator;
 3. publishes the report with `PublishTestResults@2` (also when tests failed), as a test run named
    `<testRunTitle> (shard i/N)`.
 
@@ -266,8 +310,9 @@ The [Azure DevOps pipeline](pipelines/azure-pipelines.yml) of this repository pu
 | `prepareSteps` | `[]` | steps that download the tool and the tests |
 | `toolPath` | | path of `xunit-shard.exe` on the agent |
 | `testAssembly` | | path of the test executable on the agent |
-| `junitSwitch` | `-result-junit` | `-junit` up to xUnit.net v3 3.x, `-result-junit` from 4.0 |
-| `testArguments` | `''` | more xUnit arguments (filters, `-maxThreads`, ...) |
+| `runner` | `xunit` | command line of `junitSwitch` and `testArguments`: `xunit` or `mtp` |
+| `junitSwitch` | `''` | switch that enables the JUnit report. Empty: `-result-junit` (`xunit`) or `--report-xunit-junit` (`mtp`), the xUnit.net v3 4.x switches. For 3.x: `-junit` or `--report-junit` |
+| `testArguments` | `''` | more arguments for the test executable (filters, `-maxThreads`, ...), in the command line of `runner` |
 | `testRunTitle` | `Tests` | title of the published test runs |
 | `timeoutInMinutes` | `60` | timeout of each job |
 
@@ -299,9 +344,12 @@ agents in the pool.
       junitSwitch: -junit
   ```
 
+  For a test project that uses Microsoft.Testing.Platform, set `runner: mtp` and use MTP arguments in
+  `testArguments`.
+
 - [`pipelines/azure-pipelines.yml`](pipelines/azure-pipelines.yml): the pipeline of this repository. It builds and
   tests the tool, publishes it as the `xunit-shard` artifact, then runs the Reqnroll sample in 3 shards with the
-  template.
+  template, once with each command line.
 
 ## Requirements and limitations
 
@@ -309,7 +357,9 @@ agents in the pool.
 
 - The test project uses **xUnit.net v3 3.1 or later**: `-id` was added in 3.1. Tested with 3.1.0, 3.2.2 and 4.0.2,
   with Reqnroll 3.3.4.
-- The test project runs with the xUnit.net native command line (the default when the executable is run directly).
+- To use Microsoft.Testing.Platform arguments, the test project is built with
+  `<UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>`. xUnit.net v3 4.0 or later is
+  recommended: see [xUnit.net v3 3.x](#xunitnet-and-microsofttestingplatform-command-lines).
 - Discovery is **deterministic**: every agent must discover the same tests with the same display names. Theory data
   that can't be serialized is not pre-enumerated: such a theory stays a single test case, which is fine. Data that
   changes from one run to another (random values, timestamps) breaks the plan. Check that the plan fingerprint is the
@@ -332,7 +382,7 @@ agents in the pool.
 | --- | --- |
 | `src/XunitTestSharding` | the `xunit-shard` tool |
 | `tests/XunitTestSharding.Tests` | unit tests, plus end-to-end tests that shard and run the sample |
-| `samples/Reqnroll.Sample` | Reqnroll + xUnit.net v3 project: parallel features, a `@nonparallel` feature, scenario outlines, theories and xUnit collections |
+| `samples/Reqnroll.Sample` | Reqnroll + xUnit.net v3 project using Microsoft.Testing.Platform: parallel features, a `@nonparallel` feature, scenario outlines, theories and xUnit collections |
 | `pipelines` | Azure DevOps job template, pipeline and example |
 | `.github/workflows/build.yml` | GitHub Actions build, artifacts and releases |
 
@@ -342,5 +392,5 @@ dotnet test --solution XunitTestSharding.slnx
 dotnet run --project src/XunitTestSharding -- --shard-index 1 --total-shards 3 --dry-run samples/Reqnroll.Sample/bin/Debug/net10.0/Reqnroll.Sample.dll
 ```
 
-`dotnet test` uses Microsoft.Testing.Platform (configured in `global.json`). The sample's executable keeps using the
-xUnit.net native command line when it is run directly, which is what `xunit-shard` uses.
+`dotnet test` uses Microsoft.Testing.Platform (configured in `global.json`). The sample is built with
+`UseMicrosoftTestingPlatformRunner`, so the end-to-end tests shard it with both command lines.

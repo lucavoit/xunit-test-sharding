@@ -8,14 +8,15 @@ internal sealed record ShardOptions(
     int TotalShards,
     IReadOnlyList<string> TestArguments,
     bool DryRun,
-    bool Verbose)
+    bool Verbose,
+    TestRunner Runner = TestRunner.Xunit)
 {
     // Azure DevOps sets these for jobs using 'strategy: parallel: N'. JobPositionInPhase is 1-based.
     public const string AzureDevOpsShardIndexVariable = "SYSTEM_JOBPOSITIONINPHASE";
     public const string AzureDevOpsTotalShardsVariable = "SYSTEM_TOTALJOBSINPHASE";
 
     public const string Usage = """
-        Usage: xunit-shard [options] <test-assembly> [-- <xunit arguments>]
+        Usage: xunit-shard [options] <test-assembly> [-- <test arguments>]
 
         Runs one shard of the tests of an xUnit.net v3 test assembly (.exe or .dll). The tests are
         selected by their unique ID, so every test case, including each data row of a theory or
@@ -27,13 +28,22 @@ internal sealed record ShardOptions(
                                (default: %SYSTEM_JOBPOSITIONINPHASE%)
           --total-shards <n>   total number of shards
                                (default: %SYSTEM_TOTALJOBSINPHASE%)
+          --runner <runner>    command line of the test assembly that the test arguments use:
+                                 xunit - xUnit.net command line (-junit, -trait, ...)
+                                 mtp   - Microsoft.Testing.Platform command line (--report-junit,
+                                         --filter-trait, ...), the test project must be built
+                                         with UseMicrosoftTestingPlatformRunner
+                                 auto  - mtp when a test argument starts with '--', xunit
+                                         otherwise [default]
           --dry-run            print the shard plan and the selected tests without running them
           --verbose            print the command lines that are executed
           --version            show the version of xunit-shard
           -h, --help           show this help
 
         Every argument after '--' is passed to the test assembly, both when listing and when running
-        the tests. For instance: -- -result-junit results.xml -trait- "Category=Slow"
+        the tests. For instance:
+          xunit: -- -result-junit results.xml -trait- "Category=Slow"
+          mtp:   -- --report-xunit-junit --report-xunit-junit-filename results.xml --filter-not-trait "Category=Slow"
         """;
 
     public static ShardOptions Parse(IReadOnlyList<string> args, Func<string, string?> getEnvironmentVariable)
@@ -43,6 +53,7 @@ internal sealed record ShardOptions(
         int? totalShards = null;
         var dryRun = false;
         var verbose = false;
+        string? runner = null;
         var testArguments = new List<string>();
 
         for (var i = 0; i < args.Count; i++)
@@ -69,6 +80,10 @@ internal sealed record ShardOptions(
 
                 case "--verbose":
                     verbose = true;
+                    break;
+
+                case "--runner":
+                    runner = GetValue(args, ref i);
                     break;
 
                 case "-h" or "--help" or "-?":
@@ -98,7 +113,22 @@ internal sealed record ShardOptions(
         if (shardIndex > totalShards)
             throw new UsageException($"The shard index ({shardIndex}) must not be greater than the total number of shards ({totalShards}).");
 
-        return new ShardOptions(testAssemblyPath, shardIndex.Value, totalShards.Value, testArguments, dryRun, verbose);
+        var testRunner = runner?.ToLowerInvariant() switch
+        {
+            null or "auto" => testArguments.Any(argument => argument.StartsWith("--", StringComparison.Ordinal)) ? TestRunner.MicrosoftTestingPlatform : TestRunner.Xunit,
+            "xunit" => TestRunner.Xunit,
+            "mtp" => TestRunner.MicrosoftTestingPlatform,
+            _ => throw new UsageException($"The value of '--runner' must be 'auto', 'xunit' or 'mtp', but was '{runner}'."),
+        };
+
+        // xunit-shard selects the tests itself, and must pre-enumerate the theories to shard their data rows
+        if (testRunner is TestRunner.MicrosoftTestingPlatform
+            && testArguments.FirstOrDefault(argument => argument.Equals("--filter-uid", StringComparison.OrdinalIgnoreCase) || argument.Equals("--pre-enumerate-theories", StringComparison.OrdinalIgnoreCase)) is { } reserved)
+        {
+            throw new UsageException($"The test argument '{reserved}' cannot be used: xunit-shard sets it.");
+        }
+
+        return new ShardOptions(testAssemblyPath, shardIndex.Value, totalShards.Value, testArguments, dryRun, verbose, testRunner);
     }
 
     private static string GetValue(IReadOnlyList<string> args, ref int index)
@@ -122,6 +152,16 @@ internal sealed record ShardOptions(
 
         return ParsePositiveInteger(variableName, value);
     }
+}
+
+/// <summary>The command line used to list and run the tests of the test assembly.</summary>
+internal enum TestRunner
+{
+    /// <summary>The xUnit.net in-process console runner (-list, -id, -junit, ...).</summary>
+    Xunit,
+
+    /// <summary>Microsoft.Testing.Platform (--filter-uid, --report-junit, ...).</summary>
+    MicrosoftTestingPlatform,
 }
 
 internal sealed class UsageException(string message) : Exception(message);

@@ -61,6 +61,9 @@ public sealed class ShardOptionsTests
         new[] { "Tests.exe", "--shard-index", "1", "--total-shards" },
         new[] { "Tests.exe", "Other.exe", "--shard-index", "1", "--total-shards", "2" },
         new[] { "Tests.exe", "-result-junit", "out.xml", "--shard-index", "1", "--total-shards", "2" },
+        new[] { "Tests.exe", "--runner", "vstest", "--shard-index", "1", "--total-shards", "2" },
+        new[] { "Tests.exe", "--shard-index", "1", "--total-shards", "2", "--", "--filter-uid", "abc" },
+        new[] { "Tests.exe", "--shard-index", "1", "--total-shards", "2", "--", "--pre-enumerate-theories", "off" },
     };
 
     [Theory]
@@ -68,6 +71,20 @@ public sealed class ShardOptionsTests
     public void RejectsInvalidArguments(string[] args)
     {
         Assert.Throws<UsageException>(() => ShardOptions.Parse(args, s_noEnvironment));
+    }
+
+    [Theory]
+    [InlineData(new[] { "Tests.exe" }, "xunit")]
+    [InlineData(new[] { "Tests.exe", "--", "-junit", "out.xml" }, "xunit")]
+    [InlineData(new[] { "Tests.exe", "--", "--report-junit", "--filter-trait", "a=b" }, "mtp")]
+    [InlineData(new[] { "Tests.exe", "--runner", "auto", "--", "-junit", "out.xml" }, "xunit")]
+    [InlineData(new[] { "Tests.exe", "--runner", "MTP" }, "mtp")]
+    [InlineData(new[] { "Tests.exe", "--runner", "xunit", "--", "--odd-but-forced" }, "xunit")]
+    public void SelectsTheRunner(string[] args, string expected)
+    {
+        var options = ShardOptions.Parse(["--shard-index", "1", "--total-shards", "1", .. args], s_noEnvironment);
+
+        Assert.Equal(expected == "mtp" ? TestRunner.MicrosoftTestingPlatform : TestRunner.Xunit, options.Runner);
     }
 
     [Fact]
