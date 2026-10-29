@@ -165,20 +165,20 @@ on every shard of a run. If it isn't, the agents discovered different tests (see
 
 ### Example
 
-The [sample](samples/Reqnroll.Sample) contains 24 test cases: 3 Reqnroll features, one of them tagged `@nonparallel`,
-with 2 scenario outlines, plus xUnit facts, theories and collections. With 3 shards:
+The [sample](samples/Reqnroll.Sample) contains 30 test cases: 4 Reqnroll features, one of them tagged `@nonparallel`,
+with 2 scenario outlines and an `@ignore` scenario, plus xUnit facts, theories and collections. With 3 shards:
 
 | Shard | Tests |
 | --- | --- |
-| 1 | `Database` feature (`@nonparallel`, 2 scenarios), `ExclusiveTests` (type-based collection that disables parallelization, 1), `SerialTests` (named collection that disables parallelization, 2 rows), first 3 examples of *Add many numbers* |
-| 2 | last 3 examples of *Add many numbers*, *Add two numbers*, *Subtract two numbers*, first 3 examples of *Stock is reduced when an item is sold* |
-| 3 | last example of *Stock is reduced when an item is sold*, `ParallelTests` (1 fact, 4 theory rows), `SharedFixtureTests` (named collection running in parallel, 2) |
+| 1 | `Database` feature (`@nonparallel`, 2 scenarios), `ExclusiveTests` (type-based collection that disables parallelization, 1), `SerialTests` (named collection that disables parallelization, 2 rows), first 5 examples of *Add many numbers* |
+| 2 | last example of *Add many numbers*, *Add two numbers*, *Subtract two numbers*, the 4 examples of *Stock is reduced when an item is sold*, the `Outcomes` feature (2 scenarios), `OutcomeTests.FailsOnRequest` |
+| 3 | `OutcomeTests` (2 theory rows, 1 skipped fact), `ParallelTests` (1 fact, 4 theory rows), `SharedFixtureTests` (named collection running in parallel, 2) |
 
 ```
-xunit-shard: Reqnroll.Sample: 24 tests in 3 shards (plan 50e42e728534, xUnit.net runner)
+xunit-shard: Reqnroll.Sample: 30 tests in 3 shards (plan 401bc8bd0735, xUnit.net runner)
 xunit-shard: 5 tests of collections that disable parallelization are kept on shard 1: ExclusiveCollection (1), ReqnrollNonParallelizableFeatures (2), Serial (2)
-xunit-shard: tests per shard: 1=8, 2=8, 3=8
-xunit-shard: running shard 2/3: 8 tests
+xunit-shard: tests per shard: 1=10, 2=10, 3=10
+xunit-shard: running shard 2/3: 10 tests
 ```
 
 ## Usage
@@ -382,7 +382,7 @@ agents in the pool.
 | --- | --- |
 | `src/XunitTestSharding` | the `xunit-shard` tool |
 | `tests/XunitTestSharding.Tests` | unit tests, plus end-to-end tests that shard and run the sample |
-| `samples/Reqnroll.Sample` | Reqnroll + xUnit.net v3 project using Microsoft.Testing.Platform: parallel features, a `@nonparallel` feature, scenario outlines, theories and xUnit collections |
+| `samples/Reqnroll.Sample` | Reqnroll + xUnit.net v3 project using Microsoft.Testing.Platform: parallel features, a `@nonparallel` feature, scenario outlines, theories, xUnit collections, skipped tests, and tests that fail when `XUNIT_SHARD_SAMPLE_FAILURES=1` |
 | `pipelines` | Azure DevOps job template, pipeline and example |
 | `.github/workflows/build.yml` | GitHub Actions build, artifacts and releases |
 
@@ -394,3 +394,20 @@ dotnet run --project src/XunitTestSharding -- --shard-index 1 --total-shards 3 -
 
 `dotnet test` uses Microsoft.Testing.Platform (configured in `global.json`). The sample is built with
 `UseMicrosoftTestingPlatformRunner`, so the end-to-end tests shard it with both command lines.
+
+### Tests
+
+- **Unit tests** cover the planner (balance, serial collections, independence from IDs and from the discovery
+  order), the collection rules, the command line, the parsing of both listings and the response files.
+- **End-to-end tests** (`EndToEndTests`) plan and run the sample with both command lines: every test is planned and run
+  exactly once, filters apply, and the plan is the same when the sample is copied to another directory (other IDs).
+- **Parity tests** (`ParityTests`) prove that sharding changes nothing. They run with `XUNIT_SHARD_SAMPLE_FAILURES=1`,
+  so the sample has passed, failed and skipped tests, and compare results test by test (class, name, outcome):
+  - the whole sample, run directly without `xunit-shard`, gives the same results with the xUnit.net and
+    Microsoft.Testing.Platform command lines;
+  - both command lines give the same plan (same tests on the same shards, same fingerprint) for 1 to 45 shards,
+    with and without equivalent filters;
+  - running every shard (1, 3 and 7 shards) gives exactly the results of the unsharded run, with both command lines,
+    also with equivalent filters, and each shard has the same results with both command lines;
+  - a shard fails (non-zero exit code) exactly when one of its tests fails. The exit codes themselves differ: 1 for
+    the xUnit.net runner, 2 for Microsoft.Testing.Platform.
