@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Runtime.CompilerServices;
 
 namespace XunitTestSharding;
 
@@ -30,25 +31,44 @@ internal sealed class CollectionInspector
 
     private readonly Dictionary<string, TestCollectionInfo> _collectionsByClass;
 
-    private CollectionInspector(Dictionary<string, TestCollectionInfo> collectionsByClass, bool assemblyParallelizationDisabled, IReadOnlyList<string> warnings)
+    private CollectionInspector(
+        Dictionary<string, TestCollectionInfo> collectionsByClass,
+        bool assemblyParallelizationDisabled,
+        IReadOnlyList<FrameworkDirectory> frameworks,
+        int skippedAttributes,
+        IReadOnlyList<string> warnings)
     {
         _collectionsByClass = collectionsByClass;
         AssemblyParallelizationDisabled = assemblyParallelizationDisabled;
+        Frameworks = frameworks;
+        SkippedAttributes = skippedAttributes;
         Warnings = warnings;
     }
 
     /// <summary>[assembly: CollectionBehavior(DisableTestParallelization = true)] is set.</summary>
     public bool AssemblyParallelizationDisabled { get; }
 
+    /// <summary>The installed shared frameworks of the test assembly whose assemblies were used to read it.</summary>
+    public IReadOnlyList<FrameworkDirectory> Frameworks { get; }
+
+    /// <summary>
+    /// How many times an attribute was skipped because its type is in none of the available assemblies: 0 when the
+    /// framework of the test assembly is installed.
+    /// </summary>
+    public int SkippedAttributes { get; }
+
     public IReadOnlyList<string> Warnings { get; }
 
     public TestCollectionInfo GetCollection(string? className) =>
         className is not null && _collectionsByClass.TryGetValue(className, out var collection) ? collection : TestCollectionInfo.Default;
 
-    public static CollectionInspector Inspect(string assemblyPath, IEnumerable<string?> classNames)
+    /// <param name="dotnetRoots">The .NET installations to find the frameworks of the test assembly in; by default, those of this machine.</param>
+    public static CollectionInspector Inspect(string assemblyPath, IEnumerable<string?> classNames, IEnumerable<string>? dotnetRoots = null)
     {
-        var warnings = new List<string>();
-        using var context = new MetadataLoadContext(new PathAssemblyResolver(GetResolverPaths(assemblyPath)));
+        var (frameworks, frameworkWarnings) = FrameworkResolver.Resolve(assemblyPath, dotnetRoots);
+        var warnings = frameworkWarnings.ToList();
+        var skippedAttributes = new StrongBox<int>();
+        using var context = new MetadataLoadContext(new PathAssemblyResolver(GetResolverPaths(assemblyPath, frameworks)));
         var assembly = context.LoadFromAssemblyPath(assemblyPath);
 
         var types = GetTypes(assembly, warnings);
@@ -63,7 +83,7 @@ internal sealed class CollectionInspector
         var definitionsByType = new Dictionary<string, TestCollectionInfo>(StringComparer.Ordinal);
         foreach (var type in types.Where(type => type.IsVisible))
         {
-            var definition = FindAttribute(type, CollectionDefinitionAttributeName, inherit: false, warnings);
+            var definition = FindAttribute(type, CollectionDefinitionAttributeName, inherit: false, warnings, skippedAttributes);
             if (definition is null)
                 continue;
 
@@ -89,24 +109,25 @@ internal sealed class CollectionInspector
                 continue;
             }
 
-            if (GetCollection(type, definitionsByName, definitionsByType, warnings) is { } collection)
+            if (GetCollection(type, definitionsByName, definitionsByType, warnings, skippedAttributes) is { } collection)
                 collectionsByClass[className] = collection;
         }
 
-        var collectionBehavior = assembly.GetCustomAttributesData().FirstOrDefault(attribute => attribute.AttributeType.FullName == CollectionBehaviorAttributeName);
+        var collectionBehavior = assembly.GetCustomAttributesData().FirstOrDefault(attribute => IsAttribute(attribute, CollectionBehaviorAttributeName, skippedAttributes));
         var assemblyParallelizationDisabled = collectionBehavior is not null && GetNamedArgument(collectionBehavior, "DisableTestParallelization");
 
-        return new CollectionInspector(collectionsByClass, assemblyParallelizationDisabled, warnings);
+        return new CollectionInspector(collectionsByClass, assemblyParallelizationDisabled, frameworks, skippedAttributes.Value, warnings);
     }
 
     private static TestCollectionInfo? GetCollection(
         Type testClass,
         Dictionary<string, TestCollectionInfo> definitionsByName,
         Dictionary<string, TestCollectionInfo> definitionsByType,
-        List<string> warnings)
+        List<string> warnings,
+        StrongBox<int> skippedAttributes)
     {
-        var attribute = FindAttribute(testClass, CollectionAttributeName, inherit: true, warnings)
-            ?? FindAttribute(testClass, GenericCollectionAttributeName, inherit: true, warnings);
+        var attribute = FindAttribute(testClass, CollectionAttributeName, inherit: true, warnings, skippedAttributes)
+            ?? FindAttribute(testClass, GenericCollectionAttributeName, inherit: true, warnings, skippedAttributes);
 
         if (attribute is null)
             return null;
@@ -125,7 +146,7 @@ internal sealed class CollectionInspector
             type.FullName is not null && definitionsByType.TryGetValue(type.FullName, out var definition) ? definition : new TestCollectionInfo(type.Name, DisableParallelization: false);
     }
 
-    private static CustomAttributeData? FindAttribute(Type type, string attributeName, bool inherit, List<string> warnings)
+    private static CustomAttributeData? FindAttribute(Type type, string attributeName, bool inherit, List<string> warnings, StrongBox<int> skippedAttributes)
     {
         for (var current = type; current is not null; current = inherit ? SafeGetBaseType(current) : null)
         {
@@ -140,8 +161,7 @@ internal sealed class CollectionInspector
                 return null;
             }
 
-            var attribute = attributes.FirstOrDefault(attribute =>
-                (attribute.AttributeType.IsGenericType ? attribute.AttributeType.GetGenericTypeDefinition() : attribute.AttributeType).FullName == attributeName);
+            var attribute = attributes.FirstOrDefault(attribute => IsAttribute(attribute, attributeName, skippedAttributes));
 
             if (attribute is not null)
                 return attribute;
@@ -155,11 +175,30 @@ internal sealed class CollectionInspector
             {
                 return type.BaseType;
             }
-            catch (FileNotFoundException)
+            catch (Exception ex) when (ex is FileNotFoundException or TypeLoadException)
             {
                 return null;
             }
         }
+    }
+
+    private static bool IsAttribute(CustomAttributeData attribute, string attributeName, StrongBox<int> skippedAttributes)
+    {
+        Type attributeType;
+        try
+        {
+            attributeType = attribute.AttributeType;
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or TypeLoadException)
+        {
+            // The attribute type is not in the available assemblies, for instance an attribute of a newer .NET
+            // (UnionAttribute, added in .NET 11, on the union types of C#) when that .NET is not installed. The xUnit.net
+            // attributes come from the xUnit.net assemblies next to the test assembly, so it is not one.
+            skippedAttributes.Value++;
+            return false;
+        }
+
+        return (attributeType.IsGenericType ? attributeType.GetGenericTypeDefinition() : attributeType).FullName == attributeName;
     }
 
     private static bool GetNamedArgument(CustomAttributeData attribute, string name) =>
@@ -179,10 +218,10 @@ internal sealed class CollectionInspector
     }
 
     /// <summary>
-    /// The assemblies next to the test assembly, completed by the assemblies of the current runtime for the
-    /// framework assemblies of a framework-dependent test project.
+    /// The assemblies next to the test assembly (its dependencies, and its framework when it is self-contained),
+    /// then those of the installed frameworks it runs on, then those of the .NET xunit-shard runs on as a last resort.
     /// </summary>
-    private static List<string> GetResolverPaths(string assemblyPath)
+    private static List<string> GetResolverPaths(string assemblyPath, IReadOnlyList<FrameworkDirectory> frameworks)
     {
         var paths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         void Add(string path) => paths.TryAdd(Path.GetFileNameWithoutExtension(path), path);
@@ -190,6 +229,12 @@ internal sealed class CollectionInspector
         Add(assemblyPath);
         foreach (var path in Directory.EnumerateFiles(Path.GetDirectoryName(assemblyPath)!, "*.dll"))
             Add(path);
+
+        foreach (var framework in frameworks)
+        {
+            foreach (var path in Directory.EnumerateFiles(framework.Path, "*.dll"))
+                Add(path);
+        }
 
         var runtimeDirectory = Path.GetDirectoryName(typeof(object).Assembly.Location);
         if (string.IsNullOrEmpty(runtimeDirectory))

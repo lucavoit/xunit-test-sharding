@@ -3,6 +3,7 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
+    <Net11FixtureAssemblyPath>$(MSBuildThisFileDirectory)../Net11Fixture/bin/$(Configuration)/net10.0/Net11Fixture.dll</Net11FixtureAssemblyPath>
     <SampleAssemblyPath>$(MSBuildThisFileDirectory)../../samples/Reqnroll.Sample/bin/$(Configuration)/$(TargetFramework)/Reqnroll.Sample.dll</SampleAssemblyPath>
   </PropertyGroup>
 
@@ -14,9 +15,18 @@
     <ProjectReference Include="..\..\src\XunitTestSharding\XunitTestSharding.csproj" />
     <!-- Built for the end-to-end tests, which shard it -->
     <ProjectReference Include="..\..\samples\Reqnroll.Sample\Reqnroll.Sample.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\Net11Fixture\Net11Fixture.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>NetCoreAppRef11Directory</_Parameter1>
+      <_Parameter2>$(NuGetPackageRoot)microsoft.netcore.app.ref/$(NetCoreAppRef11Version)/ref/net11.0</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>Net11FixtureAssemblyPath</_Parameter1>
+      <_Parameter2>$([System.IO.Path]::GetFullPath($(Net11FixtureAssemblyPath)))</_Parameter2>
+    </AssemblyAttribute>
     <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
       <_Parameter1>SampleAssemblyPath</_Parameter1>
       <_Parameter2>$([System.IO.Path]::GetFullPath($(SampleAssemblyPath)))</_Parameter2>

@@ -31,7 +31,7 @@ public sealed class EndToEndTests
     [InlineData(5, "mtp")]
     public async Task PlansEveryTestOfTheSampleOnce(int totalShards, string runner)
     {
-        var (plan, warnings, _) = await CreatePlanAsync(s_samplePath, totalShards, runner);
+        var (plan, warnings, _, _) = await CreatePlanAsync(s_samplePath, totalShards, runner);
 
         Assert.Empty(warnings);
         Assert.Equal(SampleTestCount, plan.TotalTests);
@@ -45,7 +45,7 @@ public sealed class EndToEndTests
     [InlineData("mtp")]
     public async Task ScenarioOutlineExamplesAreSeparateTests(string runner)
     {
-        var (plan, _, _) = await CreatePlanAsync(s_samplePath, totalShards: 1, runner);
+        var (plan, _, _, _) = await CreatePlanAsync(s_samplePath, totalShards: 1, runner);
 
         Assert.Equal(6, plan.Shards[0].Count(test => test.MethodName == "AddManyNumbers"));
     }
@@ -55,7 +55,7 @@ public sealed class EndToEndTests
     [InlineData("mtp", new[] { "--filter-not-trait", "Category=nonparallel" })]
     public async Task FiltersApplyToThePlan(string runner, string[] filter)
     {
-        var (plan, _, filtersApplied) = await CreatePlanAsync(s_samplePath, totalShards: 2, runner, filter);
+        var (plan, _, filtersApplied, _) = await CreatePlanAsync(s_samplePath, totalShards: 2, runner, filter);
 
         Assert.True(filtersApplied);
         Assert.Equal(SampleTestCount - 2, plan.TotalTests);
@@ -78,8 +78,8 @@ public sealed class EndToEndTests
                 File.Copy(file, destination);
             }
 
-            var (plan, _, _) = await CreatePlanAsync(s_samplePath, totalShards: 3, "xunit");
-            var (copyPlan, _, _) = await CreatePlanAsync(Path.Combine(copy.FullName, Path.GetFileName(s_samplePath)), totalShards: 3, "xunit");
+            var (plan, _, _, _) = await CreatePlanAsync(s_samplePath, totalShards: 3, "xunit");
+            var (copyPlan, _, _, _) = await CreatePlanAsync(Path.Combine(copy.FullName, Path.GetFileName(s_samplePath)), totalShards: 3, "xunit");
 
             Assert.NotEqual(plan.Shards[0][0].Id, copyPlan.Shards[0][0].Id);
             Assert.Equal(plan.Fingerprint, copyPlan.Fingerprint);
