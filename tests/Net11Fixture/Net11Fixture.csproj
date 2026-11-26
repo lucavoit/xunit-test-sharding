@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    A library compiled against the .NET 11 reference assemblies, like the assemblies of a net11.0 test project,
+    with the attribute that C# puts on union types (System.Runtime.CompilerServices.UnionAttribute, new in .NET 11).
+    It builds with the .NET 10 SDK: it is labelled net10.0 but references System.Runtime 11.0.0.0.
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <DisableImplicitFrameworkReferences>true</DisableImplicitFrameworkReferences>
+    <!-- Like a test project, the output contains the xUnit.net assemblies -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <NetCoreAppRef11Directory>$(NuGetPackageRoot)microsoft.netcore.app.ref/$(NetCoreAppRef11Version)/ref/net11.0/</NetCoreAppRef11Directory>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageDownload Include="Microsoft.NETCore.App.Ref" Version="[$(NetCoreAppRef11Version)]" />
+    <PackageReference Include="xunit.v3.extensibility.core" />
+  </ItemGroup>
+
+  <Target Name="AddNetCoreApp11References" BeforeTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <Reference Include="$(NetCoreAppRef11Directory)*.dll" Private="false" />
+    </ItemGroup>
+  </Target>
+
+</Project>

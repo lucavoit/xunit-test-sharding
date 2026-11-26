@@ -6,6 +6,7 @@
     <Project Path="src/XunitTestSharding/XunitTestSharding.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Net11Fixture/Net11Fixture.csproj" />
     <Project Path="tests/XunitTestSharding.Tests/XunitTestSharding.Tests.csproj" />
   </Folder>
 </Solution>

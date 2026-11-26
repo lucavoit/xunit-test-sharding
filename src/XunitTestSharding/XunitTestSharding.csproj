@@ -5,6 +5,8 @@
     <AssemblyName>xunit-shard</AssemblyName>
     <RootNamespace>XunitTestSharding</RootNamespace>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- When it is not published self-contained, also run on machines that only have a newer .NET, such as .NET 11 -->
+    <RollForward>Major</RollForward>
   </PropertyGroup>
 
   <ItemGroup>

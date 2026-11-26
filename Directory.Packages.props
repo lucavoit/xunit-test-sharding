@@ -1,7 +1,12 @@
 <Project>
+  <PropertyGroup>
+    <!-- .NET 11 reference assemblies, for tests/Net11Fixture -->
+    <NetCoreAppRef11Version>11.0.0</NetCoreAppRef11Version>
+  </PropertyGroup>
   <ItemGroup>
     <PackageVersion Include="Reqnroll.xunit.v3" Version="3.3.4" />
     <PackageVersion Include="System.Reflection.MetadataLoadContext" Version="10.0.14" />
     <PackageVersion Include="xunit.v3" Version="4.0.2" />
+    <PackageVersion Include="xunit.v3.extensibility.core" Version="4.0.2" />
   </ItemGroup>
 </Project>

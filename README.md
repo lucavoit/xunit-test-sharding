@@ -355,6 +355,11 @@ agents in the pool.
 
 **Requirements**
 
+- **.NET.** `xunit-shard` targets .NET 10 and shards test projects targeting .NET 10 or .NET 11 (including C# unions,
+  whose `UnionAttribute` only exists in .NET 11). It reads the test assembly's metadata without running it, and skips
+  attributes from a newer .NET than the one it runs on, since they can't be xUnit.net attributes. The self-contained
+  builds need no .NET installed; a framework-dependent build runs on .NET 10, or on .NET 11 when .NET 10 isn't
+  installed (`RollForward=Major`). The agents still need the runtime the test project targets to run the tests.
 - The test project uses **xUnit.net v3 3.1 or later**: `-id` was added in 3.1. Tested with 3.1.0, 3.2.2 and 4.0.2,
   with Reqnroll 3.3.4.
 - To use Microsoft.Testing.Platform arguments, the test project is built with
@@ -382,6 +387,7 @@ agents in the pool.
 | --- | --- |
 | `src/XunitTestSharding` | the `xunit-shard` tool |
 | `tests/XunitTestSharding.Tests` | unit tests, plus end-to-end tests that shard and run the sample |
+| `tests/Net11Fixture` | library compiled against the .NET 11 reference assemblies, with a C# union attribute, for the .NET 11 tests |
 | `samples/Reqnroll.Sample` | Reqnroll + xUnit.net v3 project using Microsoft.Testing.Platform: parallel features, a `@nonparallel` feature, scenario outlines, theories, xUnit collections, skipped tests, and tests that fail when `XUNIT_SHARD_SAMPLE_FAILURES=1` |
 | `pipelines` | Azure DevOps job template, pipeline and example |
 | `.github/workflows/build.yml` | GitHub Actions build, artifacts and releases |

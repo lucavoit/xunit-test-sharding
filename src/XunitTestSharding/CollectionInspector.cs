@@ -93,7 +93,7 @@ internal sealed class CollectionInspector
                 collectionsByClass[className] = collection;
         }
 
-        var collectionBehavior = assembly.GetCustomAttributesData().FirstOrDefault(attribute => attribute.AttributeType.FullName == CollectionBehaviorAttributeName);
+        var collectionBehavior = assembly.GetCustomAttributesData().FirstOrDefault(attribute => IsAttribute(attribute, CollectionBehaviorAttributeName));
         var assemblyParallelizationDisabled = collectionBehavior is not null && GetNamedArgument(collectionBehavior, "DisableTestParallelization");
 
         return new CollectionInspector(collectionsByClass, assemblyParallelizationDisabled, warnings);
@@ -140,8 +140,7 @@ internal sealed class CollectionInspector
                 return null;
             }
 
-            var attribute = attributes.FirstOrDefault(attribute =>
-                (attribute.AttributeType.IsGenericType ? attribute.AttributeType.GetGenericTypeDefinition() : attribute.AttributeType).FullName == attributeName);
+            var attribute = attributes.FirstOrDefault(attribute => IsAttribute(attribute, attributeName));
 
             if (attribute is not null)
                 return attribute;
@@ -155,11 +154,29 @@ internal sealed class CollectionInspector
             {
                 return type.BaseType;
             }
-            catch (FileNotFoundException)
+            catch (Exception ex) when (ex is FileNotFoundException or TypeLoadException)
             {
                 return null;
             }
         }
+    }
+
+    private static bool IsAttribute(CustomAttributeData attribute, string attributeName)
+    {
+        Type attributeType;
+        try
+        {
+            attributeType = attribute.AttributeType;
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or TypeLoadException)
+        {
+            // The attribute type is not in the assemblies available to xunit-shard, for instance an attribute of a newer
+            // .NET than the one xunit-shard runs on (UnionAttribute, added in .NET 11, on the union types of C#).
+            // The xUnit.net attributes come from the xUnit.net assemblies next to the test assembly, so it is not one.
+            return false;
+        }
+
+        return (attributeType.IsGenericType ? attributeType.GetGenericTypeDefinition() : attributeType).FullName == attributeName;
     }
 
     private static bool GetNamedArgument(CustomAttributeData attribute, string name) =>
