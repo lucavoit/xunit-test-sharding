@@ -20,6 +20,10 @@
 
   <ItemGroup>
     <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>NetCoreAppRef11Directory</_Parameter1>
+      <_Parameter2>$(NuGetPackageRoot)microsoft.netcore.app.ref/$(NetCoreAppRef11Version)/ref/net11.0</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
       <_Parameter1>Net11FixtureAssemblyPath</_Parameter1>
       <_Parameter2>$([System.IO.Path]::GetFullPath($(Net11FixtureAssemblyPath)))</_Parameter2>
     </AssemblyAttribute>

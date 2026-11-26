@@ -14,6 +14,12 @@ internal static class ShardRunner
         foreach (var warning in discovery.Warnings)
             output.WriteLine($"xunit-shard: warning: {warning}");
 
+        if (options.Verbose)
+        {
+            foreach (var framework in discovery.Frameworks)
+                output.WriteLine($"xunit-shard: metadata read with {framework.Name} {framework.Version} (requested {framework.RequestedVersion}): {framework.Path}");
+        }
+
         WriteSummary(output, assembly, options, plan);
 
         var selectedTests = plan.Shards[options.ShardIndex - 1];
@@ -74,7 +80,7 @@ internal static class ShardRunner
                 "Each shard runs its tests sequentially, but the shards run concurrently on different agents.");
         }
 
-        return new DiscoveryResult(ShardPlanner.Plan(tests, collections.GetCollection, options.TotalShards), warnings, filtersApplied);
+        return new DiscoveryResult(ShardPlanner.Plan(tests, collections.GetCollection, options.TotalShards), warnings, filtersApplied, collections.Frameworks);
     }
 
     /// <summary>
@@ -126,4 +132,4 @@ internal static class ShardRunner
     }
 }
 
-internal sealed record DiscoveryResult(ShardPlan Plan, IReadOnlyList<string> Warnings, bool FiltersApplied);
+internal sealed record DiscoveryResult(ShardPlan Plan, IReadOnlyList<string> Warnings, bool FiltersApplied, IReadOnlyList<FrameworkDirectory> Frameworks);

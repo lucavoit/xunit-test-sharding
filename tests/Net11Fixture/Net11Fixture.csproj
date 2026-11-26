@@ -16,6 +16,8 @@
   <ItemGroup>
     <PackageDownload Include="Microsoft.NETCore.App.Ref" Version="[$(NetCoreAppRef11Version)]" />
     <PackageReference Include="xunit.v3.extensibility.core" />
+    <!-- What a net11.0 test project has next to its assembly -->
+    <None Include="Net11Fixture.runtimeconfig.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <Target Name="AddNetCoreApp11References" BeforeTargets="ResolveAssemblyReferences">

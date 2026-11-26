@@ -194,7 +194,7 @@ xunit-shard [options] <test-assembly> [-- <test arguments>]
 | `--total-shards <n>` | Total number of shards. Defaults to `SYSTEM_TOTALJOBSINPHASE` (set by Azure DevOps). |
 | `--runner <auto\|xunit\|mtp>` | Command line that the test arguments use: `xunit` (xUnit.net), `mtp` (Microsoft.Testing.Platform), or `auto` (default): `mtp` when a test argument starts with `--`, `xunit` otherwise. See [command lines](#xunitnet-and-microsofttestingplatform-command-lines). |
 | `--dry-run` | Print the plan and the tests of the shard (ID and display name) without running them. |
-| `--verbose` | Print the command lines and the arguments passed to the test executable. |
+| `--verbose` | Print the command lines and the arguments passed to the test executable, and the framework used to read the test assembly. |
 | `--version` | Print the version of `xunit-shard`. |
 | `-h`, `--help` | Show the help. |
 | `-- <test arguments>` | Everything after `--` is passed to the test executable, **both** when listing and when running the tests. |
@@ -355,11 +355,16 @@ agents in the pool.
 
 **Requirements**
 
-- **.NET.** `xunit-shard` targets .NET 10 and shards test projects targeting .NET 10 or .NET 11 (including C# unions,
-  whose `UnionAttribute` only exists in .NET 11). It reads the test assembly's metadata without running it, and skips
-  attributes from a newer .NET than the one it runs on, since they can't be xUnit.net attributes. The self-contained
-  builds need no .NET installed; a framework-dependent build runs on .NET 10, or on .NET 11 when .NET 10 isn't
-  installed (`RollForward=Major`). The agents still need the runtime the test project targets to run the tests.
+- **.NET.** `xunit-shard` targets .NET 10 and shards test projects targeting .NET 10 or .NET 11, including C# unions.
+  - It reads the test assembly's metadata, without running it, with the framework the test project runs on: the one
+    in its `runtimeconfig.json` (for instance `Microsoft.NETCore.App 11.0.0`), found in the .NET installations of the
+    machine (`DOTNET_ROOT`, the `dotnet` on the `PATH`, the default locations), with the version the .NET host would
+    pick. `--verbose` prints it. A self-contained test project brings its framework, which is next to it.
+  - When that framework isn't installed, it falls back to the .NET it runs on, with a warning, and skips the attributes
+    whose type that .NET doesn't have (`UnionAttribute`, new in .NET 11): they can't be xUnit.net attributes.
+  - The self-contained builds of `xunit-shard` need no .NET installed. A framework-dependent build runs on .NET 10, or
+    on .NET 11 when .NET 10 isn't installed (`RollForward=Major`). The agents need the runtime the test project
+    targets anyway, to run the tests.
 - The test project uses **xUnit.net v3 3.1 or later**: `-id` was added in 3.1. Tested with 3.1.0, 3.2.2 and 4.0.2,
   with Reqnroll 3.3.4.
 - To use Microsoft.Testing.Platform arguments, the test project is built with
